@@ -1,0 +1,10 @@
+.env
+
+# Local Python venv (training)
+.venv-train/
+
+# Training (LlamaFactory / W&B / TensorBoard)
+wandb/
+training/saves/
+training/runs/
+training/data/*.jsonl

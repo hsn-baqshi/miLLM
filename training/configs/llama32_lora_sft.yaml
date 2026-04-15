@@ -1,0 +1,55 @@
+### model (gated on Hugging Face — accept license + huggingface-cli login)
+model_name_or_path: meta-llama/Llama-3.2-3B-Instruct
+trust_remote_code: true
+
+### method
+stage: sft
+do_train: true
+finetuning_type: lora
+lora_rank: 8
+lora_alpha: 16
+lora_dropout: 0.05
+lora_target: all
+# If VRAM is tight, try QLoRA instead: set quantization_bit: 4 under train section (see LlamaFactory QLoRA examples).
+
+### dataset (paths relative to repo root when dataset_dir is set below)
+dataset_dir: training/dataset
+dataset: millm_sft
+template: llama3
+cutoff_len: 2048
+max_samples: 100000
+preprocessing_num_workers: 8
+dataloader_num_workers: 2
+
+### output
+output_dir: training/saves/llama32-lora-sft
+logging_steps: 10
+save_steps: 200
+plot_loss: true
+overwrite_output_dir: true
+save_only_model: false
+# choices: [none, wandb, tensorboard, swanlab, mlflow]
+report_to: wandb
+run_name: millm-llama32-lora-sft
+# For TensorBoard instead: report_to: tensorboard  and set logging_dir, e.g.:
+# report_to: tensorboard
+# logging_dir: training/runs/llama32-lora
+
+### train
+per_device_train_batch_size: 1
+gradient_accumulation_steps: 8
+learning_rate: 5.0e-5
+num_train_epochs: 1.0
+lr_scheduler_type: cosine
+warmup_ratio: 0.1
+# bf16 needs a capable GPU (e.g. Ampere+). Use false on CPU or older GPUs; set true when CUDA + bf16 is supported.
+bf16: false
+fp16: false
+ddp_timeout: 180000000
+resume_from_checkpoint: null
+
+### eval (uncomment to add a validation split from the same file)
+# val_size: 0.1
+# eval_strategy: steps
+# eval_steps: 200
+# per_device_eval_batch_size: 1

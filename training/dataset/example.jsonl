@@ -1,0 +1,2 @@
+{"messages": [{"role": "user", "content": "What is supervised fine-tuning in one sentence?"}, {"role": "assistant", "content": "Supervised fine-tuning updates a pretrained model using labeled input-output pairs so it better follows a target task or style."}]}
+{"messages": [{"role": "user", "content": "Name three hyperparameters that affect LoRA training."}, {"role": "assistant", "content": "Common ones include learning rate, LoRA rank, and batch size (or gradient accumulation steps)."}]}
