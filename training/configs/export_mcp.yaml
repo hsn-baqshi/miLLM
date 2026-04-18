@@ -1,0 +1,14 @@
+### model
+model_name_or_path: meta-llama/Llama-3.2-3B-Instruct
+adapter_name_or_path: training/saves/mcp-tool-fast
+trust_remote_code: true
+
+### export
+template: llama3
+finetuning_type: lora
+
+### output
+export_dir: training/saves/mcp-tool-merged
+export_size: 2
+export_device: cpu
+export_legacy_format: false

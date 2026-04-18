@@ -1,0 +1,48 @@
+### model (gated on Hugging Face — accept license + huggingface-cli login)
+model_name_or_path: meta-llama/Llama-3.2-3B-Instruct
+trust_remote_code: true
+
+### method
+stage: sft
+do_train: true
+finetuning_type: lora
+quantization_bit: 4  # QLoRA for faster training and less VRAM
+lora_rank: 8
+lora_alpha: 16
+lora_dropout: 0.05
+lora_target: all
+
+### dataset (paths relative to repo root when dataset_dir is set below)
+dataset_dir: training/dataset
+dataset: mcp_tool_sft
+template: llama3
+cutoff_len: 1024  # Shorter context for faster training
+max_samples: 1000
+preprocessing_num_workers: 4
+dataloader_num_workers: 2
+
+### output
+output_dir: training/saves/mcp-tool-fast
+logging_steps: 5
+save_steps: 50
+plot_loss: true
+overwrite_output_dir: true
+save_only_model: false
+report_to: tensorboard
+run_name: mcp-tool-fast-sft
+logging_dir: training/runs/mcp-tool-fast
+
+### train (optimized for speed)
+per_device_train_batch_size: 2  # Increased batch size
+gradient_accumulation_steps: 4   # Reduced accumulation
+learning_rate: 1.0e-4           # Higher learning rate for faster convergence
+num_train_epochs: 2.0           # Fewer epochs
+lr_scheduler_type: cosine
+warmup_ratio: 0.1
+bf16: false
+fp16: false
+ddp_timeout: 180000000
+resume_from_checkpoint: null
+
+### Memory optimizations
+gradient_checkpointing: true

@@ -36,17 +36,27 @@ docker compose up -d
 
 5. **Open WebUI:** [http://localhost:3000](http://localhost:3000) — complete first-time admin signup.
 
-## Connect Open WebUI to LiteLLM
+## LLM in Open WebUI (automatic)
 
-In Open WebUI:
+[docker-compose.yml](docker-compose.yml) sets **Open WebUI** to use the **OpenAI-compatible** endpoint at **`http://litellm:4000/v1`** with **`OPENAI_API_KEY`** set from your **`LITELLM_MASTER_KEY`**. On a **first** install, Open WebUI should pick that up from the environment (see Open WebUI docs on `PersistentConfig` if you already had a volume from an older run).
 
-1. Open **Settings** → **Connections** (or **Admin** → **Connections**, depending on version).
-2. Add an **OpenAI**-compatible connection (or “OpenAI API”).
-3. Set **API Base URL** to `http://litellm:4000` so traffic stays on the Docker network between the Open WebUI and LiteLLM containers.
-4. Set **API Key** to the **virtual key** you created in the LiteLLM UI (not the master key for day-to-day chat).
-5. Save, then pick the routed model name (for example `llama3.2`) in the chat model dropdown and send a test message.
+1. Start the stack, open [http://localhost:3000](http://localhost:3000), sign in.
+2. In chat, choose the model name that matches LiteLLM (for example **`llama3.2`** from [litellm/config.yaml](litellm/config.yaml)) and send a message.
 
-If your Open WebUI build resolves connections from the browser instead of the server, try `http://localhost:4000` as the base URL instead.
+`ENABLE_OLLAMA_API` is set to **`false`** so Open WebUI does not try to talk to host Ollama from inside Docker by default; traffic goes **Open WebUI → LiteLLM → Ollama** as designed.
+
+### Optional: virtual key instead of master key
+
+For teams or tighter key scope, create a **virtual key** in [http://localhost:4000/ui](http://localhost:4000/ui), then in Open WebUI use **Admin** → **Connections** and set the OpenAI-compatible **API key** (and URL if needed) to that virtual key. That overrides the persisted “OpenAI” settings stored by Open WebUI.
+
+### Manual connection (if env-based setup is ignored)
+
+If a previous Open WebUI database already persisted other URLs, either clear the **`open_webui_data`** volume for a fresh config, set **`ENABLE_PERSISTENT_CONFIG=False`** in compose (Open WebUI will always read env; UI changes do not survive restart), or edit connections in the UI:
+
+1. **Settings** → **Connections** (or **Admin** → **Connections**).
+2. **OpenAI API** — **Base URL** `http://litellm:4000/v1` (or `http://localhost:4000/v1` if requests originate from the browser).
+3. **API Key** — LiteLLM **virtual key** (or master key for private dev only).
+4. Pick model **`llama3.2`** (or your configured alias) in the model dropdown.
 
 ## Per-user usage tracking (optional)
 
@@ -60,6 +70,12 @@ Run LM Studio’s local server on a port (for example `1234`), then add a `model
 
 For local **LoRA supervised fine-tuning** of Llama 3.2 with **W&B or TensorBoard** during training, see [training/README.md](training/README.md) and [training/configs/llama32_lora_sft.yaml](training/configs/llama32_lora_sft.yaml).
 
+## Outlook (Microsoft Graph) + LiteLLM
+
+To read recent **Outlook** mail via **Microsoft Graph** and summarize it with the **same LiteLLM** stack as Open WebUI, see [integrations/outlook_graph/README.md](integrations/outlook_graph/README.md). Optional Docker profile **`outlook`** builds `outlook-graph-assistant`; run it interactively with `docker compose --profile outlook run --rm -it outlook-graph-assistant` after `docker compose up -d`.
+
+For **Open WebUI External Tools (MCP Streamable HTTP)**, the **`outlook-mcp`** service exposes Graph mail tools at `http://outlook-mcp:8010/mcp` — see [integrations/outlook_mcp/README.md](integrations/outlook_mcp/README.md). It starts with `docker compose up -d` alongside Open WebUI.
+
 ## Files
 
 | File | Purpose |
@@ -67,3 +83,4 @@ For local **LoRA supervised fine-tuning** of Llama 3.2 with **W&B or TensorBoard
 | [docker-compose.yml](docker-compose.yml) | Postgres, LiteLLM database image, Open WebUI |
 | [litellm/config.yaml](litellm/config.yaml) | Model routes, DB and master key via env, header mappings |
 | [.env.example](.env.example) | Template for secrets and Postgres settings |
+| [integrations/outlook_graph/](integrations/outlook_graph/) | Graph + LiteLLM mail summarizer (CLI; optional Compose profile `outlook`) |

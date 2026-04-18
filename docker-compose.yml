@@ -35,21 +35,69 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
+  # Microsoft Graph mail MCP (Streamable HTTP) for Open WebUI External Tools.
+  # Open WebUI → http://outlook-mcp:8010/mcp (see integrations/outlook_mcp/README.md).
+  outlook-mcp:
+    #image: node:20-slim
+        #command: npx -y @softeria/ms-365-mcp-server --http 8080
+        #ports:
+        #  - "8080:8080"
+        #restart: always
+    build:
+      context: ./integrations
+      dockerfile: outlook_mcp/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      MCP_HTTP_PORT: ${OUTLOOK_MCP_HTTP_PORT:-8010}
+      MCP_HTTP_HOST: "0.0.0.0"
+      MSAL_TOKEN_CACHE_PATH: /data/msal_token_cache.bin
+    volumes:
+      - outlook_mcp_msal:/data
+
   open-webui:
     image: ghcr.io/open-webui/open-webui:main
     restart: unless-stopped
     depends_on:
       - litellm
+      - outlook-mcp
     ports:
       - "3000:8080"
     environment:
       WEBUI_SECRET_KEY: ${WEBUI_SECRET_KEY:?Set WEBUI_SECRET_KEY in .env}
       ENABLE_FORWARD_USER_INFO_HEADERS: "true"
+      # Wire chat to LiteLLM (OpenAI-compatible). Models come from litellm/config.yaml (e.g. llama3.2).
+      ENABLE_OPENAI_API: "true"
+      OPENAI_API_BASE_URL: http://litellm:4000/v1
+      # Same key LiteLLM accepts as admin; for stricter access create a virtual key in LiteLLM UI and override in Open WebUI Admin → Connections.
+      OPENAI_API_KEY: ${LITELLM_MASTER_KEY}
+      # Avoid a second Ollama connection from inside Docker unless you set OLLAMA_BASE_URL explicitly.
+      ENABLE_OLLAMA_API: "false"
     volumes:
       - open_webui_data:/app/backend/data
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
+  # Outlook + Graph demo (device-code login; needs -it). Not started by default.
+  # Usage: docker compose --profile outlook build outlook-graph-assistant
+  #        docker compose --profile outlook run --rm -it outlook-graph-assistant
+  outlook-graph-assistant:
+    profiles: ["outlook"]
+    build:
+      context: ./integrations/outlook_graph
+    stdin_open: true
+    tty: true
+    env_file:
+      - .env
+    environment:
+      LITELLM_BASE_URL: http://litellm:4000
+      LITELLM_API_KEY: ${LITELLM_MASTER_KEY:?Set LITELLM_MASTER_KEY in .env}
+      LITELLM_MODEL: ${LITELLM_MODEL:-llama3.2}
+    depends_on:
+      - litellm
+
 volumes:
   postgres_data:
   open_webui_data:
+  outlook_mcp_msal:

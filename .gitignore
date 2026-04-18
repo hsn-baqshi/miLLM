@@ -8,3 +8,10 @@ wandb/
 training/saves/
 training/runs/
 training/data/*.jsonl
+
+# Outlook Graph helper token cache (also ignored under integrations/outlook_graph/.gitignore)
+**/integrations/outlook_graph/token_cache.bin
+
+# Open WebUI local DB copy / feedback export (may contain private data)
+webui-temp.db
+openwebui-feedback-export.json
