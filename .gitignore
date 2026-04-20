@@ -2,6 +2,7 @@
 
 # Local Python venv (training)
 .venv-train/
+.venv-train-wsl/
 
 # Training (LlamaFactory / W&B / TensorBoard)
 wandb/
@@ -9,8 +10,8 @@ training/saves/
 training/runs/
 training/data/*.jsonl
 
-# Outlook Graph helper token cache (also ignored under integrations/outlook_graph/.gitignore)
-**/integrations/outlook_graph/token_cache.bin
+# Outlook MCP / MSAL token cache (default path next to graph_session when MSAL_TOKEN_CACHE_PATH unset)
+**/integrations/outlook_mcp/token_cache.bin
 
 # Open WebUI local DB copy / feedback export (may contain private data)
 webui-temp.db

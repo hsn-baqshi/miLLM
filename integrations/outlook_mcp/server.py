@@ -1,7 +1,7 @@
 """
 Outlook / Microsoft Graph MCP server (Streamable HTTP) for Open WebUI.
 
-Run with transport streamable-http (see __main__). Uses graph_session from outlook_graph.
+Run with transport streamable-http (see __main__). MSAL + Graph helpers: outlook_mcp.graph_session.
 """
 
 from __future__ import annotations
@@ -14,17 +14,14 @@ from typing import Annotated
 
 from mcp.server.fastmcp import FastMCP
 
-# outlook_graph lives next to this package (Docker: /app/outlook_graph)
-_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-if _ROOT not in sys.path:
-    sys.path.insert(0, _ROOT)
-
-from outlook_graph.graph_session import (  # noqa: E402
+from outlook_mcp.graph_session import (
     GraphSessionError,
     acquire_graph_token,
+    complete_device_flow_from_chat,
     default_mail_send_scopes,
     graph_list_messages,
     graph_send_mail,
+    start_device_flow_for_chat,
     try_acquire_token_silent,
 )
 
@@ -53,8 +50,8 @@ host = os.environ.get("MCP_HTTP_HOST", "0.0.0.0")
 mcp = FastMCP(
     "OutlookGraph",
     instructions=(
-        "Microsoft Outlook via Graph: outlook_login (once), outlook_list_recent, outlook_send. "
-        "Requires AZURE_TENANT_ID and AZURE_CLIENT_ID on the server."
+        "Microsoft Outlook via Graph: outlook_login_start then outlook_login_finish (recommended for Open WebUI), "
+        "or outlook_login once; then outlook_list_recent, outlook_send. Requires AZURE_TENANT_ID and AZURE_CLIENT_ID."
     ),
     host=host,
     port=port,
@@ -66,8 +63,9 @@ mcp = FastMCP(
 @mcp.tool()
 async def outlook_login() -> str:
     """
-    Sign in to Microsoft Graph (device code flow). Watch container logs for the URL and code,
-    complete login in a browser, then use outlook_list_recent / outlook_send.
+    Sign in to Microsoft Graph (device code flow) in one call. The URL and code are printed to
+    **container stderr** — in Open WebUI you often see nothing until this finishes. Prefer
+    **outlook_login_start** then **outlook_login_finish** so the device code appears in chat.
     """
     try:
         await asyncio.to_thread(acquire_graph_token, _scopes(), emit=_emit)
@@ -80,6 +78,40 @@ async def outlook_login() -> str:
                 "Microsoft sign-in completed. Token cached for this server. "
                 "If you did not see a device code, check `docker compose logs outlook-mcp`."
             ),
+        },
+        ensure_ascii=False,
+    )
+
+
+@mcp.tool()
+async def outlook_login_start() -> str:
+    """
+    Step 1 of 2: start device-code sign-in. Returns user_code, verification_uri, and login_id in JSON.
+    Open the URI in a browser, enter the code, then call outlook_login_finish(login_id).
+    """
+    try:
+        data = await asyncio.to_thread(start_device_flow_for_chat, _scopes())
+    except GraphSessionError as e:
+        return json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False)
+    return json.dumps({"ok": True, **data}, ensure_ascii=False)
+
+
+@mcp.tool()
+async def outlook_login_finish(
+    login_id: Annotated[str, "Value from outlook_login_start (field login_id)"],
+) -> str:
+    """
+    Step 2 of 2: complete device login after approving in the browser. Blocks until Microsoft confirms
+    or the flow times out.
+    """
+    try:
+        await asyncio.to_thread(complete_device_flow_from_chat, login_id.strip())
+    except GraphSessionError as e:
+        return json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False)
+    return json.dumps(
+        {
+            "ok": True,
+            "message": "Microsoft sign-in completed. Token cached for this server.",
         },
         ensure_ascii=False,
     )

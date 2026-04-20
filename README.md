@@ -70,11 +70,9 @@ Run LM Studio’s local server on a port (for example `1234`), then add a `model
 
 For local **LoRA supervised fine-tuning** of Llama 3.2 with **W&B or TensorBoard** during training, see [training/README.md](training/README.md) and [training/configs/llama32_lora_sft.yaml](training/configs/llama32_lora_sft.yaml).
 
-## Outlook (Microsoft Graph) + LiteLLM
+## Outlook (Microsoft Graph) via MCP
 
-To read recent **Outlook** mail via **Microsoft Graph** and summarize it with the **same LiteLLM** stack as Open WebUI, see [integrations/outlook_graph/README.md](integrations/outlook_graph/README.md). Optional Docker profile **`outlook`** builds `outlook-graph-assistant`; run it interactively with `docker compose --profile outlook run --rm -it outlook-graph-assistant` after `docker compose up -d`.
-
-For **Open WebUI External Tools (MCP Streamable HTTP)**, the **`outlook-mcp`** service exposes Graph mail tools at `http://outlook-mcp:8010/mcp` — see [integrations/outlook_mcp/README.md](integrations/outlook_mcp/README.md). It starts with `docker compose up -d` alongside Open WebUI.
+For **Open WebUI External Tools (MCP Streamable HTTP)**, the **`outlook-mcp`** service exposes Graph mail tools at `http://outlook-mcp:8010/mcp`. Configure Entra ID and `.env` as described in [integrations/outlook_mcp/README.md](integrations/outlook_mcp/README.md). The service starts with `docker compose up -d` alongside Open WebUI.
 
 ## Files
 
@@ -83,4 +81,4 @@ For **Open WebUI External Tools (MCP Streamable HTTP)**, the **`outlook-mcp`** s
 | [docker-compose.yml](docker-compose.yml) | Postgres, LiteLLM database image, Open WebUI |
 | [litellm/config.yaml](litellm/config.yaml) | Model routes, DB and master key via env, header mappings |
 | [.env.example](.env.example) | Template for secrets and Postgres settings |
-| [integrations/outlook_graph/](integrations/outlook_graph/) | Graph + LiteLLM mail summarizer (CLI; optional Compose profile `outlook`) |
+| [integrations/outlook_mcp/](integrations/outlook_mcp/) | Microsoft Graph mail MCP (Streamable HTTP) for Open WebUI |

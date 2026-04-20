@@ -1,11 +1,11 @@
 """
-Shared Microsoft Graph + MSAL (public client, device flow) for CLI and MCP.
+Microsoft Graph + MSAL (public client, device flow) for the Outlook MCP server.
 
 Environment (typical):
   AZURE_TENANT_ID, AZURE_CLIENT_ID — required
   AZURE_LOGIN_HOST — optional (default login.microsoftonline.com)
   GRAPH_API_ROOT — optional (default https://graph.microsoft.com/v1.0)
-  GRAPH_SCOPES — optional space-separated; defaults differ by entrypoint
+  GRAPH_SCOPES — optional space-separated; defaults include mail + send for MCP
   MSAL_TOKEN_CACHE_PATH — optional path to token cache file
 """
 
@@ -13,6 +13,10 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import threading
+import time
+import uuid
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -26,6 +30,10 @@ DEFAULT_SCOPES_MAIL_READ = ["Mail.Read", "User.Read"]
 DEFAULT_SCOPES_MAIL_SEND = ["Mail.Read", "Mail.Send", "User.Read"]
 
 _DEFAULT_CACHE = Path(__file__).resolve().parent / "token_cache.bin"
+
+# In-flight MSAL device flows (login_id -> state). Same process must start and complete.
+_DEVICE_FLOWS_LOCK = threading.Lock()
+_DEVICE_FLOWS: dict[str, dict[str, Any]] = {}
 
 
 class GraphSessionError(Exception):
@@ -75,6 +83,92 @@ def _save_cache(path: Path, cache: msal.SerializableTokenCache) -> None:
         path.write_text(cache.serialize(), encoding="utf-8")
 
 
+def _purge_stale_device_flows() -> None:
+    now = time.time()
+    with _DEVICE_FLOWS_LOCK:
+        dead = [k for k, v in _DEVICE_FLOWS.items() if now > float(v.get("expires_at", 0))]
+        for k in dead:
+            _DEVICE_FLOWS.pop(k, None)
+
+
+def start_device_flow_for_chat(scopes: list[str]) -> dict[str, Any]:
+    """
+    Begin MSAL device code flow and return instructions + login_id for the client (e.g. Open WebUI).
+    Call complete_device_flow_from_chat(login_id) after the user signs in at Microsoft.
+    """
+    _purge_stale_device_flows()
+    tenant = os.environ.get("AZURE_TENANT_ID", "").strip()
+    client_id = os.environ.get("AZURE_CLIENT_ID", "").strip()
+    if not tenant or not client_id:
+        raise GraphSessionError(
+            "Set AZURE_TENANT_ID and AZURE_CLIENT_ID (see integrations/outlook_mcp/README.md)."
+        )
+    authority = azure_authority_url(tenant)
+    cache_path = token_cache_path()
+    cache = _load_cache(cache_path)
+    app = msal.PublicClientApplication(
+        client_id,
+        authority=authority,
+        token_cache=cache,
+    )
+    flow = app.initiate_device_flow(scopes=scopes)
+    if "user_code" not in flow:
+        raise GraphSessionError(f"Device flow failed: {flow.get('error_description', flow)}")
+    login_id = str(uuid.uuid4())
+    expires_at = time.time() + float(flow.get("expires_in", 900))
+    with _DEVICE_FLOWS_LOCK:
+        _DEVICE_FLOWS[login_id] = {
+            "app": app,
+            "flow": flow,
+            "cache_path": cache_path,
+            "expires_at": expires_at,
+        }
+    return {
+        "login_id": login_id,
+        "user_code": flow.get("user_code"),
+        "verification_uri": flow.get("verification_uri"),
+        "message": flow.get("message"),
+        "expires_in": flow.get("expires_in"),
+        "next": "Call tool outlook_login_finish with this login_id after you approve sign-in in the browser.",
+    }
+
+
+def complete_device_flow_from_chat(login_id: str) -> str:
+    """Poll Microsoft until the user completes device login; persist token cache and return access token."""
+    _purge_stale_device_flows()
+    with _DEVICE_FLOWS_LOCK:
+        entry = _DEVICE_FLOWS.get(login_id)
+    if not entry:
+        raise GraphSessionError(
+            "Unknown or expired login_id. Run outlook_login_start again and use the new login_id."
+        )
+    if time.time() > float(entry["expires_at"]):
+        with _DEVICE_FLOWS_LOCK:
+            _DEVICE_FLOWS.pop(login_id, None)
+        raise GraphSessionError("Device flow expired. Run outlook_login_start again.")
+    app = entry["app"]
+    flow = entry["flow"]
+    cache_path = entry["cache_path"]
+    result = app.acquire_token_by_device_flow(flow)
+    cache = app.token_cache
+    if isinstance(cache, msal.SerializableTokenCache):
+        _save_cache(cache_path, cache)
+    with _DEVICE_FLOWS_LOCK:
+        _DEVICE_FLOWS.pop(login_id, None)
+    if "access_token" not in result:
+        desc = result.get("error_description", result)
+        extra = ""
+        if isinstance(desc, str) and "AADSTS9002332" in desc:
+            extra = (
+                "\n\nThis app is **single-tenant (Azure AD only)**. You cannot use AZURE_TENANT_ID=consumers with it. "
+                "Either: (1) keep your org tenant GUID and sign in with a **member** M365 account, or (2) in Entra "
+                "change **Supported account types** to include **personal Microsoft accounts** (or create a second "
+                "app for personal mail) and then use consumers + that app's Client ID."
+            )
+        raise GraphSessionError(f"Auth failed: {desc}{extra}")
+    return result["access_token"]
+
+
 def try_acquire_token_silent(scopes: list[str]) -> str | None:
     """Return access token from cache only; no device flow."""
     tenant = os.environ.get("AZURE_TENANT_ID", "").strip()
@@ -108,7 +202,7 @@ def acquire_graph_token(
     client_id = os.environ.get("AZURE_CLIENT_ID", "").strip()
     if not tenant or not client_id:
         raise GraphSessionError(
-            "Set AZURE_TENANT_ID and AZURE_CLIENT_ID (see integrations/outlook_graph/README.md)."
+            "Set AZURE_TENANT_ID and AZURE_CLIENT_ID (see integrations/outlook_mcp/README.md)."
         )
 
     authority = azure_authority_url(tenant)
@@ -225,6 +319,45 @@ def graph_list_messages(token: str, top: int) -> dict[str, Any]:
         return r.json()
 
 
+def _graph_http_error_body(r: httpx.Response, *, max_len: int = 4000) -> str:
+    raw = (r.text or "").strip()[:max_len]
+    if not raw:
+        return "(empty body)"
+    try:
+        data = json.loads(raw)
+        err = data.get("error") if isinstance(data, dict) else None
+        if isinstance(err, dict):
+            code = err.get("code", "")
+            msg = err.get("message", "")
+            inner = err.get("innerError")
+            inner_s = f" innerError={inner}" if inner else ""
+            if code or msg:
+                return f"{code}: {msg}{inner_s}".strip()
+    except json.JSONDecodeError:
+        pass
+    return raw
+
+
+_ADDR_IN_ANGLE_BRACKETS = re.compile(r"<([^<>]+@[^<>]+)>")
+
+
+def _parse_recipient_addresses(to_address: str) -> list[str]:
+    """
+    Split comma/semicolon-separated recipients and normalize 'Name <email@host>' to bare address.
+    """
+    out: list[str] = []
+    for part in to_address.replace(";", ",").split(","):
+        chunk = part.strip()
+        if not chunk:
+            continue
+        m = _ADDR_IN_ANGLE_BRACKETS.search(chunk)
+        if m:
+            out.append(m.group(1).strip().strip('"'))
+        else:
+            out.append(chunk.strip().strip('"'))
+    return out
+
+
 def graph_send_mail(
     token: str,
     *,
@@ -241,15 +374,19 @@ def graph_send_mail(
         "Content-Type": "application/json",
     }
     content_type = "HTML" if is_html else "Text"
-    recipients = [
-        {"emailAddress": {"address": a.strip()}}
-        for a in to_address.replace(";", ",").split(",")
-        if a.strip()
-    ]
+    addresses = _parse_recipient_addresses(to_address or "")
+    if not addresses:
+        raise GraphSessionError(
+            "sendMail needs at least one recipient email in to_address "
+            "(comma or semicolon separated; 'Display Name <user@domain.com>' is supported)."
+        )
+    recipients = [{"emailAddress": {"address": a}} for a in addresses]
+    subj = "" if subject is None else str(subject)
+    body_str = "" if body is None else str(body)
     payload = {
         "message": {
-            "subject": subject,
-            "body": {"contentType": content_type, "content": body},
+            "subject": subj,
+            "body": {"contentType": content_type, "content": body_str},
             "toRecipients": recipients,
         },
         "saveToSentItems": True,
@@ -257,8 +394,13 @@ def graph_send_mail(
     with httpx.Client(timeout=60.0) as client:
         r = client.post(url, headers=headers, json=payload)
         if r.status_code not in (202, 200):
+            detail = _graph_http_error_body(r)
+            diag = _graph_response_diagnostics(r)
             raise GraphSessionError(
-                f"sendMail failed HTTP {r.status_code}: {(r.text or '')[:2000]}"
+                f"sendMail failed HTTP {r.status_code}.\n"
+                f"Graph: {detail}\n"
+                f"Recipients sent: {addresses!r}\n"
+                f"Headers (subset): {diag}"
             )
 
 

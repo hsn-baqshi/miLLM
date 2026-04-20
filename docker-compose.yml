@@ -38,11 +38,6 @@ services:
   # Microsoft Graph mail MCP (Streamable HTTP) for Open WebUI External Tools.
   # Open WebUI → http://outlook-mcp:8010/mcp (see integrations/outlook_mcp/README.md).
   outlook-mcp:
-    #image: node:20-slim
-        #command: npx -y @softeria/ms-365-mcp-server --http 8080
-        #ports:
-        #  - "8080:8080"
-        #restart: always
     build:
       context: ./integrations
       dockerfile: outlook_mcp/Dockerfile
@@ -78,24 +73,6 @@ services:
       - open_webui_data:/app/backend/data
     extra_hosts:
       - "host.docker.internal:host-gateway"
-
-  # Outlook + Graph demo (device-code login; needs -it). Not started by default.
-  # Usage: docker compose --profile outlook build outlook-graph-assistant
-  #        docker compose --profile outlook run --rm -it outlook-graph-assistant
-  outlook-graph-assistant:
-    profiles: ["outlook"]
-    build:
-      context: ./integrations/outlook_graph
-    stdin_open: true
-    tty: true
-    env_file:
-      - .env
-    environment:
-      LITELLM_BASE_URL: http://litellm:4000
-      LITELLM_API_KEY: ${LITELLM_MASTER_KEY:?Set LITELLM_MASTER_KEY in .env}
-      LITELLM_MODEL: ${LITELLM_MODEL:-llama3.2}
-    depends_on:
-      - litellm
 
 volumes:
   postgres_data:
